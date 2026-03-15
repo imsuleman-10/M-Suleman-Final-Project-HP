@@ -24,16 +24,43 @@ const seedAdmin = async () => {
 };
 
 // Connect to MongoDB
-connectDB().then(seedAdmin);
+connectDB()
+    .then(() => {
+        console.log('Database connected successfully');
+        seedAdmin();
+    })
+    .catch(err => {
+        console.error('CRITICAL: Database connection failed:', err.message);
+        // Don't process.exit here on Vercel, just log it so we can see it in dashboard
+    });
 
 const app = express();
 
+// ... existing middleware ...
 app.use(cors());
 app.use(express.json());
 
-// Main route
+// Diagnostic logging middleware
+app.use((req, res, next) => {
+    console.log(`[${new Date().toISOString()}] ${req.method} ${req.url}`);
+    next();
+});
+
+// Health check and environment check
+app.get('/api/health', (req, res) => {
+    const dbState = require('mongoose').connection.readyState;
+    const states = ['Disconnected', 'Connected', 'Connecting', 'Disconnecting'];
+    res.json({
+        status: 'UP',
+        dbState: states[dbState] || 'Unknown',
+        timestamp: new Date().toISOString(),
+        node_env: process.env.NODE_ENV
+    });
+});
+
+// Root route
 app.get('/', (req, res) => {
-    res.send('API is running...');
+    res.send('Hunarmand API is running...');
 });
 
 // Import Routes
@@ -42,8 +69,22 @@ app.use('/api/users', require('./routes/userRoutes'));
 app.use('/api/courses', require('./routes/courseRoutes'));
 app.use('/api/enroll', require('./routes/enrollmentRoutes'));
 
+// Global error handler
+app.use((err, req, res, next) => {
+    console.error('GLOBAL ERROR:', err.stack);
+    res.status(500).json({ error: 'Internal Server Error', details: err.message });
+});
+
 const PORT = process.env.PORT || 5000;
 
-app.listen(PORT, () => {
-    console.log(`Server is running on port ${PORT}`);
+if (process.env.NODE_ENV !== 'production') {
+    app.listen(PORT, () => {
+        console.log(`Server is running on port ${PORT}`);
+    });
+}
+
+process.on('unhandledRejection', (reason, promise) => {
+    console.error('Unhandled Rejection at:', promise, 'reason:', reason);
 });
+
+module.exports = app;
